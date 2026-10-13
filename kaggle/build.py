@@ -73,8 +73,13 @@ print('kaggle =', IN_KAGGLE, '| colab =', IN_COLAB)
 '''
 
 CODE_DEPS = '''
-subprocess.run([sys.executable, '-m', 'pip', '-q', 'install',
-                '-r', 'requirements-colab.txt'], check=True)
+# In ra đuôi log của pip: khi chạy trên Kaggle thì log là kênh gỡ lỗi duy nhất.
+_inst = subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements-colab.txt'],
+                       capture_output=True, text=True)
+print(_inst.stdout[-4000:])
+if _inst.returncode != 0:
+    print(_inst.stderr[-4000:])
+    raise SystemExit(f'pip install thất bại (mã {_inst.returncode})')
 
 import torch, transformers, peft, accelerate, bitsandbytes
 print('torch        ', torch.__version__)
