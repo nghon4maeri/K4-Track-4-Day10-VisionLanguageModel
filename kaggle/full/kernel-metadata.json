@@ -1,0 +1,18 @@
+{
+  "id": "namnguynnnn/k4-day10-full",
+  "title": "K4 Day10 E1 E2 E3 E4",
+  "code_file": "k4-day10-full.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "lorenzoarcioni/road-damage-dataset-potholes-cracks-and-manholes"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}

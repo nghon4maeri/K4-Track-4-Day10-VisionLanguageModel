@@ -1,0 +1,20 @@
+{
+  "id": "namnguynnnn/k4-day10-grpo",
+  "title": "K4 Day10 E5 GRPO",
+  "code_file": "k4-day10-grpo.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "lorenzoarcioni/road-damage-dataset-potholes-cracks-and-manholes"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "namnguynnnn/k4-day10-full"
+  ],
+  "model_sources": []
+}

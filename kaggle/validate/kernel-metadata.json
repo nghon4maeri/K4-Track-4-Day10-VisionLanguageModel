@@ -1,0 +1,18 @@
+{
+  "id": "namnguynnnn/k4-day10-validate",
+  "title": "K4 Day10 validate + E0",
+  "code_file": "k4-day10-validate.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "machine_shape": "NvidiaTeslaT4",
+  "dataset_sources": [
+    "lorenzoarcioni/road-damage-dataset-potholes-cracks-and-manholes"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [],
+  "model_sources": []
+}
