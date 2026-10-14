@@ -8,10 +8,15 @@ import json
 import sys
 from pathlib import Path
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 ROOT = Path(__file__).resolve().parent.parent
 TARGETS = {
     "lab_day10.ipynb": ROOT / "lab_day10.ipynb",
-    "validate": ROOT / "kaggle/validate/k4-day10-validate.ipynb",
+    "validate": ROOT / "kaggle/validate/k4-day10-validate-e0.ipynb",
     "full": ROOT / "kaggle/full/k4-day10-full.ipynb",
     "grpo": ROOT / "kaggle/grpo/k4-day10-grpo.ipynb",
 }

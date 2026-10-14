@@ -19,11 +19,15 @@ ROOT = HERE.parent
 
 USER = "namnguynnnn"
 DATASET = "lorenzoarcioni/road-damage-dataset-potholes-cracks-and-manholes"
-SLUG = {"validate": "k4-day10-validate", "full": "k4-day10-full", "grpo": "k4-day10-grpo"}
+# Slug cục bộ = tên file .ipynb. `id` trong kernel-metadata.json phải là ref
+# THẬT trên Kaggle, nếu không `kaggle kernels push` sẽ tạo kernel mới thay vì
+# cập nhật (slug do title quyết định, xem cảnh báo của CLI khi push).
+SLUG = {"validate": "k4-day10-validate-e0", "full": "k4-day10-full",
+        "grpo": "k4-day10-grpo"}
 TITLE = {
-    "validate": "K4 Day10 validate + E0",
-    "full": "K4 Day10 E1 E2 E3 E4",
-    "grpo": "K4 Day10 E5 GRPO",
+    "validate": "K4 Day10 validate + E0",     # -> k4-day10-validate-e0
+    "full": "K4 Day10 full",                  # -> k4-day10-full
+    "grpo": "K4 Day10 grpo",                  # -> k4-day10-grpo
 }
 
 # --------------------------------------------------------------------------
@@ -416,8 +420,10 @@ MD_SETUP = "## 6. Setup LoRA / đóng băng cho E1, E2, E3"
 CODE_SETUP = '''
 from peft import LoraConfig, get_peft_model
 
-LLM_RE = r'language_model\\.layers\\.\\d+\\.(self_attn\\.(q|k|v|o)_proj|mlp\\.(gate|up|down)_proj)'
-VIT_RE = r'visual\\.blocks\\.\\d+\\.(attn\\.(qkv|proj)|mlp\\.(linear_fc1|linear_fc2))'
+# PEFT khớp target_modules bằng re.fullmatch trên TÊN ĐẦY ĐỦ của module
+# (vd 'model.language_model.layers.0.self_attn.q_proj'), nên bắt buộc có tiền tố.
+LLM_RE = r'(?:.*\\.)?language_model\\.layers\\.\\d+\\.(self_attn\\.(q|k|v|o)_proj|mlp\\.(gate|up|down)_proj)'
+VIT_RE = r'(?:.*\\.)?visual\\.blocks\\.\\d+\\.(attn\\.(qkv|proj)|mlp\\.(linear_fc1|linear_fc2))'
 PROJ_KEY = ('visual.merger', 'visual.deepstack_merger_list')
 
 
@@ -432,6 +438,9 @@ def apply_setup(model, setup, rank=16, alpha=32):
         patterns.append(VIT_RE)                 # LoRA thêm trên attention/MLP của ViT
     combined = '|'.join(f'({p})' for p in patterns)
 
+    # Đếm module đích trên model gốc (trước khi PEFT bọc thêm module con).
+    matched = [n for n, _ in model.named_modules() if re.fullmatch(combined, n)]
+
     cfg = LoraConfig(r=rank, lora_alpha=alpha, lora_dropout=0.05,
                      target_modules=combined, bias='none', task_type='CAUSAL_LM')
     model = get_peft_model(model, cfg)
@@ -443,7 +452,6 @@ def apply_setup(model, setup, rank=16, alpha=32):
                 p.data = p.data.to(torch.float32)
                 p.requires_grad_(True)
 
-    matched = [n for n, _ in model.named_modules() if re.search(combined, n)]
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f'{setup}: matched_modules={len(matched)}  trainable_params={n_train:,}')
     return model
@@ -501,17 +509,23 @@ def _check_encode():
     check(decoded.startswith(ans), 'phần học giải mã ra đúng JSON đáp án')
     check('<|im_end|>' in decoded, 'có token kết thúc <|im_end|> trong nhãn')
 
-    b = [encode_example(Image.open(Path('data') / x['image_path']).convert('RGB'),
-                        PROMPT, objects_to_answer(x['objects']), proc)[0]
-         for x in _entries_train[:2]]
-    c = collate(b)
+    _encs = [encode_example(Image.open(Path('data') / x['image_path']).convert('RGB'),
+                            PROMPT, objects_to_answer(x['objects']), proc)[0]
+             for x in _entries_train[:2]]
+    c = collate(_encs)
     check(c['input_ids'].shape[0] == 2 and c['labels'].shape == c['input_ids'].shape,
           f"collate cho shape {tuple(c['input_ids'].shape)}")
-    check(c['pixel_values'].shape[0] == 2, 'collate nối pixel_values theo chiều 0')
+    # pixel_values là các patch đã làm phẳng -> nối theo chiều 0 cho ra tổng số patch.
+    n_patch = sum(e['pixel_values'].shape[0] for e in _encs)
+    g = c.get('image_grid_thw')
+    grid_ok = (g is None) or (g.shape[0] == 2)
+    check(c['pixel_values'].shape[0] == n_patch and grid_ok,
+          'collate pixel_values = ' + str(n_patch) + ' patch; grid_thw = '
+          + ('None' if g is None else str(g.shape[0])))
 
 
 def _check_vit_dtype():
-    merger = dict(model.named_parameters())['visual.merger.mlp.0.weight']
+    merger = next(p for n, p in model.named_parameters() if 'visual.merger' in n)
     print('dtype visual.merger:', merger.dtype)
     check(merger.dtype == torch.float16,
           'visual.merger ở fp16 (ViT không bị lượng tử hoá 4-bit)')
@@ -528,8 +542,8 @@ _STATE = {}
 
 def _check_targets():
     names = [n for n, _ in model.named_modules()]
-    n_llm = len([n for n in names if re.search(LLM_RE, n)])
-    n_vit = len([n for n in names if re.search(VIT_RE, n)])
+    n_llm = len([n for n in names if re.fullmatch(LLM_RE, n)])
+    n_vit = len([n for n in names if re.fullmatch(VIT_RE, n)])
     print(f'LLM={n_llm} ViT={n_vit}')
     check(n_llm == 252, f'LLM có 252 module đích (36x7), đếm được {n_llm}')
     check(n_vit == 96, f'ViT có 96 module đích (24x4), đếm được {n_vit}')
@@ -552,12 +566,14 @@ def _check_e3():
     del model
     torch.cuda.empty_cache()
     model_e3, _ = load_base()                          # E3 = E2 + LoRA trên ViT
+    # Đếm module đích trên model GỐC (trước khi PEFT bọc), nếu không sẽ đếm cả
+    # các module con lora_A/lora_B/base_layer do PEFT thêm vào.
+    n_match = len([n for n, _ in model_e3.named_modules()
+                   if re.fullmatch(f'({LLM_RE})|({VIT_RE})', n)])
     peft_e3 = apply_setup(model_e3, 'E3')
-    matched = [n for n, _ in peft_e3.named_modules()
-               if re.search(f'({LLM_RE})|({VIT_RE})', n)]
     n_e3 = sum(p.numel() for p in peft_e3.parameters() if p.requires_grad)
-    print(f'E3 matched={len(matched)} trainable={n_e3:,}')
-    check(len(matched) == 348, f'E3 có 348 module đích, đếm được {len(matched)}')
+    print(f'E3 matched={n_match} trainable={n_e3:,}')
+    check(n_match == 348, f'E3 có 348 module đích, đếm được {n_match}')
     if 'n_e2' in _STATE:
         check(n_e3 > _STATE['n_e2'],
               f"E3 trainable={n_e3:,} > E2 trainable={_STATE['n_e2']:,} "
@@ -605,13 +621,13 @@ MD_TRAIN = "## 8. Vòng huấn luyện"
 CODE_TRAIN = '''
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
-from torch.cuda.amp import GradScaler
+from torch.amp import GradScaler
 from transformers import get_cosine_schedule_with_warmup
 
 LR = 2e-4
 BATCH_SIZE = 2
 GRAD_ACCUM = 4
-MAX_STEPS = 300
+EPOCHS = 1                  # ~1 epoch là đủ (steps/epoch = ceil(n_ảnh / (BATCH_SIZE*GRAD_ACCUM)))
 
 
 class VLDataset(Dataset):
@@ -653,7 +669,7 @@ def save_ckpt(model, path):
 
 
 def train_run(setup, name, rank=16, alpha=32, train_fraction=1.0,
-              coord_scale='norm1000', max_steps=MAX_STEPS, save_every=100):
+              coord_scale='norm1000', max_steps=None, save_every=100):
     prompt = PROMPT if coord_scale == 'norm1000' else PROMPT_PIXEL
     if coord_scale == 'norm1000':
         def answer_fn(e):
@@ -667,13 +683,33 @@ def train_run(setup, name, rank=16, alpha=32, train_fraction=1.0,
 
     entries = read_jsonl('data/splits/train.jsonl')
     ds = VLDataset(entries, prompt, answer_fn, processor, fraction=train_fraction, seed=42)
+    if max_steps is None:
+        _denom = BATCH_SIZE * GRAD_ACCUM
+        max_steps = max(1, ((len(ds) + _denom - 1) // _denom) * EPOCHS)
     loader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
     print(f'{name}: {len(ds)} ảnh train | {max_steps} bước tối ưu | '
           f'batch={BATCH_SIZE} x accum={GRAD_ACCUM} | coord={coord_scale}')
 
     trainable = [p for p in model.parameters() if p.requires_grad]
+
+    def _gd(t):
+        return getattr(t, 'grad_dtype', None)
+
+    # torch mới có thuộc tính grad_dtype. Tham số visual (nạp fp16) sinh grad fp16
+    # dù đã ép fp32; đặt grad_dtype=None để autograd chấp nhận mọi dtype grad, rồi
+    # vòng huấn luyện tự ép grad về fp32 trước khi cập nhật.
+    for p in trainable:
+        if p.dtype != torch.float32:
+            p.data = p.data.to(torch.float32)
+        try:
+            p.grad_dtype = None
+        except Exception:                                   # noqa: BLE001
+            pass
+
     trainable_params = sum(p.numel() for p in trainable)
-    opt = AdamW(trainable, lr=LR, weight_decay=0)
+    print(f'{name}: trainable dtypes = {sorted({str(p.dtype) for p in trainable})} '
+          f'grad_dtypes = {sorted({str(_gd(p)) for p in trainable})}')
+    opt = AdamW(trainable, lr=LR, weight_decay=0, foreach=False)
     sched = get_cosine_schedule_with_warmup(opt, max(1, int(0.05 * max_steps)), max_steps)
     scaler = GradScaler('cuda')
 
@@ -697,10 +733,32 @@ def train_run(setup, name, rank=16, alpha=32, train_fraction=1.0,
             scaler.scale(loss).backward()
             losses.append(float(loss.detach()) * GRAD_ACCUM)
 
-        scaler.unscale_(opt)
-        torch.nn.utils.clip_grad_norm_(trainable, 1.0)
-        scaler.step(opt)
-        scaler.update()
+        # torch 2.11 + transformers 5.19: 8 bias của visual merger bị ép fp16 trong
+        # lúc forward nên sinh grad fp16, và GradScaler.unscale_ từ chối grad fp16.
+        # Khôi phục tham số về fp32, ép grad về fp32 rồi tự giải scale thủ công.
+        _scale = float(scaler.get_scale())
+        _found_inf = False
+        with torch.no_grad():
+            for p in trainable:
+                if p.grad is None:
+                    continue
+                if p.dtype != torch.float32:
+                    p.data = p.data.to(torch.float32)
+                if p.grad.dtype != torch.float32:
+                    try:
+                        p.grad_dtype = None
+                    except Exception:                       # noqa: BLE001
+                        pass
+                    p.grad = p.grad.float()
+                if not torch.isfinite(p.grad).all():
+                    _found_inf = True
+                p.grad.div_(_scale)
+        if _found_inf:
+            scaler.update(new_scale=max(1.0, _scale * 0.5))
+        else:
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            opt.step()
+            scaler.update(new_scale=_scale)
         opt.zero_grad()
         sched.step()
 
@@ -1045,12 +1103,24 @@ run_inference('E5', adapter_dir='work/E5_grpo_final', projector_path=PROJECTOR_P
 run_score('E5', 'work/e5.jsonl', 'report/evidence/e5.json')
 '''
 
+CODE_BUNDLE = '''
+# Gom evidence + figures thành một file zip ở /kaggle/working để tải về bằng
+# `kaggle kernels output <kernel> --file-pattern report_bundle.zip`.
+if IN_KAGGLE:
+    import shutil
+    _src = Path('report')
+    if _src.exists():
+        _z = shutil.make_archive('/kaggle/working/report_bundle', 'zip', root_dir=str(_src))
+        print('report_bundle:', _z, Path(_z).stat().st_size, 'bytes')
+    else:
+        print('không thấy report/ để gom')
+'''
+
 # --------------------------------------------------------------------------
 # Lắp ghép
 # --------------------------------------------------------------------------
 ALL = {'validate', 'full', 'grpo', 'notebook'}
 BASE = ALL
-
 CELLS = [
     ('md', MD_TITLE, ALL),
     ('md', MD_ENV, BASE),
@@ -1099,6 +1169,7 @@ CELLS = [
     ('code', CODE_E5_DATASET, {'grpo', 'notebook'}),
     ('code', CODE_E5_TRAIN, {'grpo', 'notebook'}),
     ('code', CODE_E5_EVAL, {'grpo', 'notebook'}),
+    ('code', CODE_BUNDLE, {'validate', 'full', 'grpo'}),
 ]
 
 STAGES = ['validate', 'full', 'grpo']
